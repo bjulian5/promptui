@@ -1,4 +1,4 @@
-module github.com/tigergraph/promptui
+module github.com/bjulian5/promptui
 
 go 1.12
 

@@ -1,15 +1,18 @@
 package list
 
 import (
-	"fmt"
-	"reflect"
-	"strings"
+    "fmt"
+    "reflect"
+    "strings"
 )
 
 // Searcher is a base function signature that is used inside select when activating the search mode.
 // If defined, it is called on each items of the select and should return a boolean for whether or not
 // the item fits the searched term.
 type Searcher func(input string, index int) bool
+
+
+type Generator func(input string) interface{}
 
 // NotFound is an index returned when no item was selected. This could
 // happen due to a search without results.
@@ -19,12 +22,13 @@ const NotFound = -1
 // visible items. The list can be moved up, down by one item of time or an
 // entire page (ie: visible size). It keeps track of the current selected item.
 type List struct {
-	items    []*interface{}
-	scope    []*interface{}
-	cursor   int // cursor holds the index of the current selected item
-	size     int // size is the number of visible options
-	start    int
-	Searcher Searcher
+	items     []*interface{}
+	scope     []*interface{}
+	cursor    int // cursor holds the index of the current selected item
+	size      int // size is the number of visible options
+	start     int
+	Searcher  Searcher
+	Generator Generator
 }
 
 // New creates and initializes a list of searchable items. The items attribute must be a slice type with a
@@ -64,11 +68,16 @@ func (l *List) Prev() {
 
 // Search allows the list to be filtered by a given term. The list must
 // implement the searcher function signature for this functionality to work.
-func (l *List) Search(term string) {
-	term = strings.Trim(term, " ")
-	l.cursor = 0
-	l.start = 0
-	l.search(term)
+func (l *List) Search(term string, refresh func()) {
+    go func() {
+        term = strings.Trim(term, " ")
+        l.cursor = 0
+        l.start = 0
+        l.search(term)
+        if refresh != nil {
+            refresh()
+        }
+    }()
 }
 
 // CancelSearch stops the current search and returns the list to its
@@ -81,12 +90,34 @@ func (l *List) CancelSearch() {
 
 func (l *List) search(term string) {
 	var scope []*interface{}
+	var additionalItems interface{}
 
-	for i, item := range l.items {
-		if l.Searcher(term, i) {
-			scope = append(scope, item)
-		}
-	}
+	if l.Generator != nil {
+        additionalItems = l.Generator(term)
+    }
+
+
+    if additionalItems == nil || reflect.TypeOf(additionalItems).Kind() != reflect.Slice {
+        for i, item := range l.items {
+            if l.Searcher(term, i) {
+                scope = append(scope, item)
+            }
+        }
+    } else {
+        slice := reflect.ValueOf(additionalItems)
+        values := make([]*interface{}, slice.Len())
+
+        for i := range values {
+            item := slice.Index(i).Interface()
+            values[i] = &item
+        }
+        for i, item := range l.items {
+            if l.Searcher(term, i) {
+                scope = append(scope, item)
+            }
+        }
+        scope = append(scope, values...)
+    }
 
 	l.scope = scope
 }

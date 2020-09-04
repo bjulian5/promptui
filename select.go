@@ -1,16 +1,16 @@
 package promptui
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-	"os"
-	"text/template"
+    "bytes"
+    "fmt"
+    "io"
+    "os"
+    "text/template"
 
-	"github.com/chzyer/readline"
-	"github.com/juju/ansiterm"
-	"github.com/tigergraph/promptui/list"
-	"github.com/tigergraph/promptui/screenbuf"
+    "github.com/bjulian5/promptui/list"
+    "github.com/bjulian5/promptui/screenbuf"
+    "github.com/chzyer/readline"
+    "github.com/juju/ansiterm"
 )
 
 // SelectedAdd is used internally inside SelectWithAdd when the add option is selected in select mode.
@@ -68,6 +68,9 @@ type Select struct {
 	// for whether or not the terms are alike. It is unimplemented by default and search will not work unless
 	// it is implemented.
 	Searcher list.Searcher
+
+
+	Generator list.Generator
 
 	// StartInSearchMode sets whether or not the select mode should start in search mode or selection mode.
 	// For search mode to work, the Search property must be implemented.
@@ -188,7 +191,12 @@ var SearchPrompt = "Search: "
 // the command prompt or it has received a valid value. It will return the value and an error if any
 // occurred during the select's execution.
 func (s *Select) Run() (int, string, error) {
-	return s.RunCursorAt(s.CursorPos, 0)
+	i, item, err := s.RunCursorAt(s.CursorPos, 0)
+	return i, fmt.Sprintf("%v", item), err
+}
+
+func (s *Select) RunAndReturnInterface() (int, interface{}, error) {
+    return s.RunCursorAt(s.CursorPos, 0)
 }
 
 // RunCursorAt executes the select list, initializing the cursor to the given
@@ -197,7 +205,7 @@ func (s *Select) Run() (int, string, error) {
 // within to list. Run will keep the prompt alive until it has been canceled
 // from the command prompt or it has received a valid value. It will return
 // the value and an error if any occurred during the select's execution.
-func (s *Select) RunCursorAt(cursorPos, scroll int) (int, string, error) {
+func (s *Select) RunCursorAt(cursorPos, scroll int) (int, interface{}, error) {
 	if s.Size == 0 {
 		s.Size = 5
 	}
@@ -207,6 +215,7 @@ func (s *Select) RunCursorAt(cursorPos, scroll int) (int, string, error) {
 		return 0, "", err
 	}
 	l.Searcher = s.Searcher
+	l.Generator = s.Generator
 
 	s.list = l
 
@@ -219,7 +228,7 @@ func (s *Select) RunCursorAt(cursorPos, scroll int) (int, string, error) {
 	return s.innerRun(cursorPos, scroll, ' ')
 }
 
-func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, string, error) {
+func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, interface{}, error) {
 	c := &readline.Config{
 		Stdin:  s.Stdin,
 		Stdout: s.Stdout,
@@ -254,6 +263,69 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, string, error) 
 	s.list.SetStart(scroll)
 
 	c.SetListener(func(line []rune, pos int, key rune) ([]rune, int, bool) {
+	    refreshing := false
+	    refresh := func() {
+	        if refreshing {
+	            return
+            }
+            refreshing = true
+            if searchMode {
+                header := SearchPrompt + cur.Format()
+                sb.WriteString(header)
+            } else if !s.HideHelp {
+                help := s.renderHelp(canSearch)
+                sb.Write(help)
+            }
+
+            label := render(s.Templates.label, s.Label)
+            sb.Write(label)
+
+            items, idx := s.list.Items()
+            last := len(items) - 1
+
+            for i, item := range items {
+                page := " "
+
+                switch i {
+                case 0:
+                    if s.list.CanPageUp() {
+                        page = "↑"
+                    } else {
+                        page = string(top)
+                    }
+                case last:
+                    if s.list.CanPageDown() {
+                        page = "↓"
+                    }
+                }
+
+                output := []byte(page + " ")
+
+                if i == idx {
+                    output = append(output, render(s.Templates.active, item)...)
+                } else {
+                    output = append(output, render(s.Templates.inactive, item)...)
+                }
+
+                sb.Write(output)
+            }
+
+            if idx == list.NotFound {
+                sb.WriteString("")
+                sb.WriteString("No results")
+            } else {
+                active := items[idx]
+
+                details := s.renderDetails(active)
+                for _, d := range details {
+                    sb.Write(d)
+                }
+            }
+
+            sb.Flush()
+            refreshing = false
+        }
+
 		switch {
 		case key == KeyEnter:
 			return nil, 0, true
@@ -280,7 +352,7 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, string, error) 
 
 			cur.Backspace()
 			if len(cur.Get()) > 0 {
-				s.list.Search(cur.Get())
+				s.list.Search(cur.Get(), refresh)
 			} else {
 				s.list.CancelSearch()
 			}
@@ -291,64 +363,10 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, string, error) 
 		default:
 			if canSearch && searchMode {
 				cur.Update(string(line))
-				s.list.Search(cur.Get())
+				s.list.Search(cur.Get(), refresh)
 			}
 		}
-
-		if searchMode {
-			header := SearchPrompt + cur.Format()
-			sb.WriteString(header)
-		} else if !s.HideHelp {
-			help := s.renderHelp(canSearch)
-			sb.Write(help)
-		}
-
-		label := render(s.Templates.label, s.Label)
-		sb.Write(label)
-
-		items, idx := s.list.Items()
-		last := len(items) - 1
-
-		for i, item := range items {
-			page := " "
-
-			switch i {
-			case 0:
-				if s.list.CanPageUp() {
-					page = "↑"
-				} else {
-					page = string(top)
-				}
-			case last:
-				if s.list.CanPageDown() {
-					page = "↓"
-				}
-			}
-
-			output := []byte(page + " ")
-
-			if i == idx {
-				output = append(output, render(s.Templates.active, item)...)
-			} else {
-				output = append(output, render(s.Templates.inactive, item)...)
-			}
-
-			sb.Write(output)
-		}
-
-		if idx == list.NotFound {
-			sb.WriteString("")
-			sb.WriteString("No results")
-		} else {
-			active := items[idx]
-
-			details := s.renderDetails(active)
-			for _, d := range details {
-				sb.Write(d)
-			}
-		}
-
-		sb.Flush()
+        refresh()
 
 		return nil, 0, true
 	})
@@ -399,7 +417,7 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, string, error) 
 	rl.Write([]byte(showCursor))
 	rl.Close()
 
-	return s.list.Index(), fmt.Sprintf("%v", item), err
+	return s.list.Index(), item, err
 }
 
 // ScrollPosition returns the current scroll position.
@@ -551,7 +569,7 @@ func (sa *SelectWithAdd) Run() (int, string, error) {
 
 		selected, value, err := s.innerRun(1, 0, '+')
 		if err != nil || selected != 0 {
-			return selected - 1, value, err
+			return selected - 1, fmt.Sprintf("%v", value), err
 		}
 
 		// XXX run through terminal for windows

@@ -1,13 +1,13 @@
 package promptui
 
 import (
-	"fmt"
-	"io"
-	"strings"
-	"text/template"
+    "fmt"
+    "io"
+    "strings"
+    "text/template"
 
-	"github.com/chzyer/readline"
-	"github.com/tigergraph/promptui/screenbuf"
+    "github.com/bjulian5/promptui/screenbuf"
+    "github.com/chzyer/readline"
 )
 
 const default_prompt_placehold_size = 4

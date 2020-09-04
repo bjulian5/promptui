@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tigergraph/promptui"
+	"github.com/bjulian5/promptui"
 )
 
 func main() {
