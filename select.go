@@ -266,6 +266,7 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, interface{}, er
 	    refreshing := false
 	    refresh := func() {
 	        if refreshing {
+	            sb.Flush()
 	            return
             }
             refreshing = true
