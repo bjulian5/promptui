@@ -233,6 +233,11 @@ func (s *Select) innerRun(cursorPos, scroll int, top rune) (int, interface{}, er
 		Stdin:  s.Stdin,
 		Stdout: s.Stdout,
 	}
+
+    if c.Stdout == nil {
+        c.Stdout = &bellSkipper{}
+    }
+
 	err := c.Init()
 	if err != nil {
 		return 0, "", err

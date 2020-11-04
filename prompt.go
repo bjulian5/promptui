@@ -3,6 +3,7 @@ package promptui
 import (
     "fmt"
     "io"
+    "os"
     "strings"
     "text/template"
 
@@ -109,6 +110,32 @@ type PromptTemplates struct {
 	success    *template.Template
 }
 
+
+// bellSkipper implements an io.WriteCloser that skips the terminal bell
+// character (ASCII code 7), and writes the rest to os.Stderr. It is used to
+// replace readline.Stdout, that is the package used by promptui to display the
+// prompts.
+//
+// This is a workaround for the bell issue documented in
+// https://github.com/manifoldco/promptui/issues/49.
+type bellSkipper struct{}
+
+// Write implements an io.WriterCloser over os.Stderr, but it skips the terminal
+// bell character.
+func (bs *bellSkipper) Write(b []byte) (int, error) {
+    const charBell = 7 // c.f. readline.CharBell
+    if len(b) == 1 && b[0] == charBell {
+        return 0, nil
+    }
+    return os.Stderr.Write(b)
+}
+
+// Close implements an io.WriterCloser over os.Stderr.
+func (bs *bellSkipper) Close() error {
+    return os.Stderr.Close()
+}
+
+
 // Run executes the prompt. Its displays the label and default value if any, asking the user to enter a value.
 // Run will keep the prompt alive until it has been canceled from the command prompt or it has received a valid
 // value. It will return the value and an error if any occurred during the prompt's execution.
@@ -134,6 +161,10 @@ func (p *Prompt) Run() (string, error) {
 		VimMode:        p.IsVimMode,
 		UniqueEditLine: true,
 	}
+
+    if c.Stdout == nil {
+        c.Stdout = &bellSkipper{}
+    }
 
 	err = c.Init()
 	if err != nil {
